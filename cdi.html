@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CDI CyberControl v1.0</title>
+    <!-- Tailwind CSS untuk Desain Instan -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style>
+        .neon-glow {
+            box-shadow: 0 0 15px rgba(6, 182, 212, 0.5);
+        }
+        .neon-text {
+            text-shadow: 0 0 10px rgba(6, 182, 212, 0.8);
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans min-h-screen flex flex-col justify-between p-4">
+
+    <!-- Header & Status Koneksi -->
+    <header class="w-full max-w-md mx-auto flex justify-between items-center bg-slate-900/80 p-4 rounded-2xl border border-slate-800 backdrop-blur-md">
+        <div>
+            <h1 class="text-xl font-black tracking-wider text-cyan-400 neon-text">CDI CONTROL</h1>
+            <p class="text-xs text-slate-400 font-mono">ARDUINO NANO V3</p>
+        </div>
+        <button id="btnConnect" class="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded-xl transition-all duration-300 neon-glow text-sm flex items-center gap-2">
+            <span id="dotStatus" class="w-2.5 h-2.5 bg-slate-950 rounded-full animate-ping"></span>
+            <span id="textStatus">CONNECT</span>
+        </button>
+    </header>
+
+    <!-- Monitor Utama (RPM & Derajat Pengapian) -->
+    <main class="w-full max-w-md mx-auto my-6 flex-grow flex flex-col gap-6">
+        
+        <!-- Live RPM Display -->
+        <div class="bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 p-6 rounded-3xl text-center relative overflow-hidden">
+            <div class="absolute -right-10 -top-10 w-32 h-32 bg-cyan-500/10 rounded-full blur-2xl"></div>
+            <p class="text-xs tracking-widest text-slate-400 font-mono font-bold">ENGINE TACHOMETER</p>
+            <div class="my-4">
+                <span id="rpmValue" class="text-6xl font-black font-mono text-cyan-400 neon-text">0</span>
+                <span class="text-lg font-bold text-slate-500 ml-1">RPM</span>
+            </div>
+            <!-- Progress Bar RPM Mini -->
+            <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                <div id="rpmBar" class="bg-cyan-400 h-full w-0 transition-all duration-100 neon-glow"></div>
+            </div>
+        </div>
+
+        <!-- Mode Berkendara Quick Select -->
+        <div class="grid grid-cols-2 gap-4">
+            <button onclick="sendMode('RACING')" class="bg-slate-900 border border-slate-800 hover:border-red-500/50 p-4 rounded-2xl flex flex-col items-center gap-2 group transition-all">
+                <span class="text-2xl group-hover:scale-110 transition-transform">🔥</span>
+                <span class="font-bold text-sm text-slate-300 group-hover:text-red-400">RACING MODE</span>
+                <span class="text-[10px] text-slate-500">Limiter 12.000 RPM</span>
+            </button>
+            <button onclick="sendMode('ECO')" class="bg-slate-900 border border-slate-800 hover:border-emerald-500/50 p-4 rounded-2xl flex flex-col items-center gap-2 group transition-all">
+                <span class="text-2xl group-hover:scale-110 transition-transform">🌱</span>
+                <span class="font-bold text-sm text-slate-300 group-hover:text-emerald-400">ECO MODE</span>
+                <span class="text-[10px] text-slate-500">Limiter 7.500 RPM</span>
+            </button>
+        </div>
+
+        <!-- Kontrol Finetuning Limiter & Timing -->
+        <div class="bg-slate-900/50 border border-slate-800/80 p-5 rounded-3xl flex flex-col gap-5">
+            <h3 class="text-sm font-bold tracking-wide text-slate-400 font-mono">LIVE TUNING PARAMETERS</h3>
+            
+            <!-- Slider Timing Pengapian -->
+            <div class="flex flex-col gap-2">
+                <div class="flex justify-between text-xs font-mono">
+                    <span class="text-slate-400">Timing Advance</span>
+                    <span class="text-cyan-400 font-bold"><span id="timingValue">15</span>° BTDC</span>
+                </div>
+                <input type="range" id="sliderTiming" min="5" max="35" value="15" 
+                    class="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-400">
+            </div>
+
+            <!-- Slider Limiter RPM -->
+            <div class="flex flex-col gap-2">
+                <div class="flex justify-between text-xs font-mono">
+                    <span class="text-slate-400">RPM Limiter Threshold</span>
+                    <span class="text-cyan-400 font-bold"><span id="limiterValue">8500</span> RPM</span>
+                </div>
+                <input type="range" id="sliderLimiter" min="4000" max="13000" step="500" value="8500" 
+                    class="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-400">
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="w-full text-center text-[10px] text-slate-600 font-mono tracking-wider">
+        CYBERCONTROL SYSTEM V1 // 2026
+    </footer>
+
+    <!-- LOGIKA JAVASCRIPT & BLUETOOTH -->
+    <script>
+        let bluetoothDevice = null;
+        let characteristicTxRx = null;
+
+        const btnConnect = document.getElementById('btnConnect');
+        const textStatus = document.getElementById('textStatus');
+        const dotStatus = document.getElementById('dotStatus');
+        
+        // Konstanta UUID Bluetooth standar untuk modul HC-05/06 (Serial Port Profile)
+        const UUID_SERVICE = "00001101-0000-1000-8000-00805f9b34fb"; 
+
+        // Fungsi Membuka Koneksi Bluetooth HP ke HC-05
+        async function connectBluetooth() {
+            try {
+                textStatus.innerText = "PAIRING...";
+                
+                // Minta izin akses perangkat bluetooth ke HP
+                bluetoothDevice = await navigator.bluetooth.requestDevice({
+                    filters: [{ namePrefix: 'HC-' }], // Mencari modul Bluetooth HC-05 atau HC-06
+                    optionalServices: [UUID_SERVICE]
+                });
+
+                const server = await bluetoothDevice.gatt.connect();
+                const service = await server.getPrimaryService(UUID_SERVICE);
+                
+                // Mendapatkan jalur komunikasi data
+                const characteristics = await service.getCharacteristics();
+                characteristicTxRx = characteristics[0];
+
+                // Setup Listener untuk menerima data dari Arduino (seperti data RPM)
+                await characteristicTxRx.startNotifications();
+                characteristicTxRx.addEventListener('characteristicvaluechanged', handleDataMasuk);
+
+                // Update UI jika berhasil connect
+                textStatus.innerText = "CONNECTED";
+                btnConnect.classList.replace('bg-cyan-500', 'bg-emerald-500');
+                dotStatus.classList.replace('bg-slate-950', 'bg-slate-100');
+                
+            } catch (error) {
+                console.log(error);
+                textStatus.innerText = "FAILED";
+                setTimeout(() => { textStatus.innerText = "CONNECT"; }, 2000);
+            }
+        }
+
+        // Fungsi Mengirim Data dari HP ke Arduino
+        async function kirimData(teks) {
+            if (characteristicTxRx) {
+                const encoder = new TextEncoder();
+                // Tambahkan tanda '\n' (pindah baris) sebagai akhir perintah data
+                await characteristicTxRx.writeValue(encoder.encode(teks + '\n'));
+                console.log("Terkirim: " + teks);
+            } else {
+                alert("Hubungkan bluetooth terlebih dahulu!");
+            }
+        }
+
+        // Fungsi Membaca Data Masuk dari Arduino (Misal data RPM)
+        function handleDataMasuk(event) {
+            const decoder = new TextDecoder('utf-8');
+            let dataStr = decoder.decode(event.target.value).trim();
+            
+            // Misalkan Arduino mengirim data angka RPM, langsung update UI aplikasi
+            if(!isNaN(dataStr) && dataStr !== "") {
+                let rpm = parseInt(dataStr);
+                document.getElementById('rpmValue').innerText = rpm;
+                
+                // Update Progress Bar RPM (asumsi RPM Maksimal 13.000)
+                let persenBar = (rpm / 13000) * 100;
+                document.getElementById('rpmBar').style.width = `${persenBar}%`;
+            }
+        }
+
+        // Event Listener untuk Tombol Connect
+        btnConnect.addEventListener('click', connectBluetooth);
+
+        // Event Listener untuk Slider Parameter
+        const sliderTiming = document.getElementById('sliderTiming');
+        sliderTiming.addEventListener('input', (e) => {
+            document.getElementById('timingValue').innerText = e.target.value;
+        });
+        sliderTiming.addEventListener('change', (e) => {
+            kirimData(`TIMING:${e.target.value}`); // Mengirim format "TIMING:20" saat slider dilepas
+        });
+
+        const sliderLimiter = document.getElementById('sliderLimiter');
+        sliderLimiter.addEventListener('input', (e) => {
+            document.getElementById('limiterValue').innerText = e.target.value;
+        });
+        sliderLimiter.addEventListener('change', (e) => {
+            kirimData(`LIMIT:${e.target.value}`); // Mengirim format "LIMIT:9000" saat slider dilepas
+        });
+
+        // Fungsi untuk Tombol Mode Quick Select
+        function sendMode(mode) {
+            kirimData(`MODE:${mode}`); // Mengirim "MODE:RACING" atau "MODE:ECO"
+        }
+    </script>
+</body>
+</html>
